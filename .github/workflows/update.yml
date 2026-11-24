@@ -1,44 +1,69 @@
 name: Update fund catalog
+
 on:
   workflow_dispatch:
   schedule:
     - cron: '20 10 * * *'
+
 permissions:
   contents: write
   pages: write
   id-token: write
+
 concurrency:
   group: fund-pages
   cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Sync latest version
+        run: git pull --rebase origin main
+
       - name: Update catalog
         run: python update_catalog.py
+
       - name: Update quotes
         run: python update_quotes.py
+
       - name: Save data
         run: |
           git config user.name fund-catalog-bot
           git config user.email fund-catalog-bot@users.noreply.github.com
           git add data/catalog.json data/quotes.json
-          git diff --cached --quiet || (git commit -m 'Update fund data' && git push)
+
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update fund data'
+            git pull --rebase origin main
+            git push origin main
+          fi
+
       - uses: actions/configure-pages@v5
+
       - name: Prepare website
         run: |
           mkdir -p _site/data
           cp index.html _site/
           cp data/*.json _site/data/
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+
       - uses: actions/deploy-pages@v4
         id: deploy
