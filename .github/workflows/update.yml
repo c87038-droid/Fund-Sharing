@@ -17,10 +17,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +43,6 @@ jobs:
           git config user.name fund-catalog-bot
           git config user.email fund-catalog-bot@users.noreply.github.com
           git add data/catalog.json data/quotes.json
-
           if ! git diff --cached --quiet; then
             git commit -m 'Update fund data'
             git pull --rebase origin main
@@ -60,10 +56,28 @@ jobs:
           mkdir -p _site/data
           cp index.html _site/
           cp data/*.json _site/data/
+          test -s _site/index.html
+          ls -lh _site/data/
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v4
         with:
+          name: github-pages
           path: _site
+          retention-days: 3
 
-      - uses: actions/deploy-pages@v4
+  deploy:
+    needs: update
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Deploy website
+        uses: actions/deploy-pages@v4
         id: deploy
+        with:
+          artifact_name: github-pages
