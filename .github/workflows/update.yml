@@ -1,0 +1,21 @@
+name: Update fund catalog
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 10 * * *'
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python update_catalog.py
+      - run: |
+          git config user.name 'fund-catalog-bot'
+          git config user.email 'fund-catalog-bot@users.noreply.github.com'
+          git add data/catalog.json
+          git diff --cached --quiet || (git commit -m 'Update official fund catalog' && git push)
