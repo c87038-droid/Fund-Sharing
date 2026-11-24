@@ -33,8 +33,8 @@ def index(catalog):
    if v and f.get('currency'):idx[(f['market'],typ,norm(v),currency(f['currency']))].add(key(f))
  return idx
 def match(r,m,idx):
- cu=currency(get(r,'計價幣別','基金幣別','配息幣別','幣別')); hits=[]
- for typ,v in [('isin',get(r,'基金ISIN_CODE','基金ISIN Code')),('code',get(r,'基金統編','基金代碼'))]:
+ cu=currency(get(r,'計價幣別','基金幣別','配息幣別','幣別','基金計價幣別')); hits=[]
+ for typ,v in [('isin',get(r,'基金ISIN_CODE','基金ISIN Code','ISIN','ISIN Code')),('code',get(r,'基金統編','基金代碼','統編'))]:
   if v:
    h=idx.get((m,typ,norm(v),cu),set());
    if h:hits.append(h)
@@ -43,7 +43,7 @@ def match(r,m,idx):
 def main():
  catalog=json.loads((ROOT/'catalog.json').read_text())['funds']; idx=index(catalog); path=ROOT/'quotes.json'; old=json.loads(path.read_text()) if path.exists() else {}; data=old.get('funds',{}); status=[]; today=datetime.date.today().isoformat(); cutoff=(datetime.date.today()-datetime.timedelta(days=366)).isoformat()
  for m,kind,sid,url in SOURCES:
-  count=0
+  count=0; matched=0; missing_amount=0
   try:
    with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'FundCatalog/1.0'}),timeout=60) as resp: rr=rows(resp.read())
    if not rr:raise ValueError('empty CSV')
@@ -51,9 +51,11 @@ def main():
    for r in rr:
     k=match(r,m,idx)
     if not k:continue
+    matched+=1
     d=date(get(r,'淨值日期','日期') if kind=='nav' else get(r,'除息日'))
     # Only explicit per-unit amounts. Offshore totals/components are not assumed to be per unit.
-    n=number(get(r,'基金淨值','最新淨值小計(總額)') if kind=='nav' else get(r,'每單位分派金額','每單位配息金額','每單位配息'))
+    n=number(get(r,'基金淨值','最新淨值小計(總額)') if kind=='nav' else get(r,'每單位分派金額','每單位配息金額','每單位配息','每受益權單位配息金額','每單位收益分配金額'))
+    if n is None:missing_amount+=1
     if not d or d>today or n is None or (kind=='nav' and n<=0):continue
     f=data.setdefault(k,{'navs':{},'history':{}})
     if kind=='nav': f['navs'][d]={'amount':n,'source':sid}
@@ -61,7 +63,7 @@ def main():
      freq=norm(get(r,'配息頻率')); times={'月配':12,'月配息':12,'每月':12,'monthly':12,'季配':4,'季配息':4,'每季':4,'半年配':2,'每半年':2,'年配':1,'每年':1}.get(freq)
      f['history'][d]={'date':d,'amount':n,'source':sid,'frequency':times}
     count+=1
-   status.append({'id':sid,'count':count,'ok':count>0});print(sid,'matched',count)
+   status.append({'id':sid,'count':count,'ok':count>0,'identity_matches':matched,'missing_amount':missing_amount});print(sid,'matched',count,'identity_matches',matched,'missing_amount',missing_amount)
   except Exception as e:status.append({'id':sid,'count':0,'ok':False});print(sid,'ERROR',str(e))
  for k,f in list(data.items()):
   f['navs']={d:v for d,v in f.get('navs',{}).items() if d>=cutoff};f['history']={d:v for d,v in f.get('history',{}).items() if d>=cutoff}
