@@ -96,7 +96,7 @@ def index(catalog):
     idx[(f['market'],typ,norm(v),currency(f['currency']))].add(key(f))
     idx[(f['market'],'unique-'+typ,norm(v),'')].add(key(f))
  return idx
-TDCC_CODE_ISIN={'agif-fvm':'lu0820561818','agif-fvgm':'lu2023250330','gliacu':'lu2347655073'}
+TDCC_CODE_ISIN={'agif-fvm':'lu0820561818','agif-fvgm':'lu2023250330','gliacu':'lu2347655073','abagpapusd':'lu2859284783','nnemdhxdzarh':'lu1075101847'}
 def match(r,m,idx):
  cu=currency(get(r,'計價幣別','基金幣別','配息幣別','幣別','基金計價幣別')); hits=[]
  for typ,v in [('isin',get(r,'基金ISIN_CODE','基金ISIN Code','ISIN','ISIN Code','ISIN_CODE','ISINCODE','基金ISIN')),('code',get(r,'基金統編','基金代碼','統編'))]:
