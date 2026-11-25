@@ -3,7 +3,7 @@ from collections import defaultdict
 ROOT=pathlib.Path(__file__).parent/'data'
 SIT='https://www.sitca.org.tw/MemberK0000/F/03/'
 TD='https://opendata.tdcc.com.tw/getOD.ashx?id='
-SOURCES=[('境內','nav',11109,SIT+'nav.csv'),('境內','div',160547,SIT+'160547%E6%8A%95%E4%BF%A1%E6%8A%95%E9%A1%A7%E5%85%AC%E6%9C%83%E5%A2%83%E5%85%A7%E5%9F%BA%E9%87%91%E9%85%8D%E6%81%AF%E8%B3%87%E6%96%99.csv'),('境外','div',11642,TD+'3-5')]+[('境外','nav',n,TD+k) for n,k in [(37818,'3-20'),(37820,'3-22'),(37821,'3-21')]]
+SOURCES=[('境內','nav',11109,SIT+'nav.csv'),('境內','div',160547,SIT+'160547%E6%8A%95%E4%BF%A1%E6%8A%95%E9%A1%A7%E5%85%AC%E6%9C%83%E5%A2%83%E5%85%A7%E5%9F%BA%E9%87%91%E9%85%8D%E6%81%AF%E8%B3%87%E6%96%99.csv'),('境外','div',11642,TD+'3-5')]+[('境外','nav',n,TD+k) for n,k in [(37818,'3-20'),(37820,'3-22'),(37821,'3-21')]]+[('境外','nav',11641,TD+'3-4')]
 def norm(s): return re.sub(r'\s+','',unicodedata.normalize('NFKC',str(s or '')).casefold())
 def currency(s):
  s=norm(s); return {'美元':'usd','美金':'usd','南非幣':'zar','南非蘭特':'zar','新臺幣':'twd','新台幣':'twd','台幣':'twd','臺幣':'twd','歐元':'eur','日圓':'jpy','日元':'jpy','澳幣':'aud','澳元':'aud','英鎊':'gbp','人民幣':'cny','港幣':'hkd','港元':'hkd','瑞士法郎':'chf','加幣':'cad','加拿大幣':'cad','紐幣':'nzd','紐西蘭幣':'nzd','日幣':'jpy','新加坡幣':'sgd'}.get(s,s)
@@ -59,6 +59,11 @@ def ingest(rr,m,kind,sid,idx,data,today):
  print(sid,'headers:',list(rr[0]))
  for r in rr:
   k=match(r,m,idx)
+  if not k and sid==11641 and not get(r,'計價幣別','基金幣別','幣別','基金計價幣別'):
+   code=norm(get(r,'基金代碼'))
+   if code:
+    candidates=idx.get((m,'unique-code',code,''),set()) | idx.get((m,'unique-isin',TDCC_CODE_ISIN.get(code,code),''),set())
+    if len(candidates)==1:k=next(iter(candidates))
   if not k:continue
   matched+=1
   d=date(get(r,'淨值日期','日期') if kind=='nav' else get(r,'除息日','除息日期'))
@@ -87,7 +92,9 @@ def index(catalog):
  idx=defaultdict(set)
  for f in catalog:
   for typ,v in [('isin',f.get('isin')),('code',f.get('code'))]:
-   if v and f.get('currency'):idx[(f['market'],typ,norm(v),currency(f['currency']))].add(key(f))
+   if v and f.get('currency'):
+    idx[(f['market'],typ,norm(v),currency(f['currency']))].add(key(f))
+    idx[(f['market'],'unique-'+typ,norm(v),'')].add(key(f))
  return idx
 TDCC_CODE_ISIN={'agif-fvm':'lu0820561818','agif-fvgm':'lu2023250330','gliacu':'lu2347655073'}
 def match(r,m,idx):
@@ -123,10 +130,15 @@ def main():
   if not f['navs'] and not f['history']:del data[k];continue
   for rec in f['history'].values():
    prev=(datetime.date.fromisoformat(rec['date'])-datetime.timedelta(days=1)).isoformat()
-   if not rec.get('pre_ex_nav') and f['navs'].get(prev,{}).get('amount'):
-    rec['pre_ex_nav']=f['navs'][prev]['amount']
+   target=datetime.date.fromisoformat(prev)
+   while target.weekday()>=5:target-=datetime.timedelta(days=1)
+   actual=prev if f['navs'].get(prev,{}).get('amount') else target.isoformat()
+   if not rec.get('pre_ex_nav') and f['navs'].get(actual,{}).get('amount'):
+    rec['pre_ex_nav']=f['navs'][actual]['amount'];rec['pre_ex_nav_date']=actual
+   if rec.get('pre_ex_nav') and not rec.get('pre_ex_nav_date'):rec['pre_ex_nav_date']=None
   nd=max(f['navs'],default=''); hist=sorted(f['history'].values(),key=lambda h:h['date'],reverse=True);h=hist[0] if hist else {}; ex=h.get('date'); prev=(datetime.date.fromisoformat(ex)-datetime.timedelta(days=1)).isoformat() if ex else ''; pre=h.get('pre_ex_nav') or f['navs'].get(prev,{}).get('amount')
-  f.update(nav=f['navs'].get(nd,{}).get('amount'),nav_date=nd or None,nav_source=f['navs'].get(nd,{}).get('source'),distribution=h.get('amount'),ex_date=ex,pre_ex_nav=pre,payments_per_year=h.get('frequency'),records=hist)
+  f.update(nav=f['navs'].get(nd,{}).get('amount'),nav_date=nd or None,nav_source=f['navs'].get(nd,{}).get('source'),distribution=h.get('amount'),ex_date=ex,pre_ex_nav=pre,pre_ex_nav_date=h.get('pre_ex_nav_date'),payments_per_year=h.get('frequency'),records=hist)
+ print('Distribution rates ready:',sum(1 for f in data.values() if f.get('distribution') is not None and f.get('pre_ex_nav') and f.get('payments_per_year')))
  tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps({'updated':datetime.datetime.now(datetime.timezone.utc).isoformat(),'status':status,'funds':data},ensure_ascii=False,separators=(',',':')),encoding='utf-8');tmp.replace(path)
  if not any(s['ok'] for s in status): raise SystemExit('No verified rows; check source headers')
 if __name__=='__main__':main()
