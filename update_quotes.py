@@ -6,7 +6,7 @@ TD='https://opendata.tdcc.com.tw/getOD.ashx?id='
 SOURCES=[('境內','nav',11109,SIT+'nav.csv'),('境內','div',160547,SIT+'160547%E6%8A%95%E4%BF%A1%E6%8A%95%E9%A1%A7%E5%85%AC%E6%9C%83%E5%A2%83%E5%85%A7%E5%9F%BA%E9%87%91%E9%85%8D%E6%81%AF%E8%B3%87%E6%96%99.csv'),('境外','div',11642,TD+'3-5')]+[('境外','nav',n,TD+k) for n,k in [(37818,'3-20'),(37820,'3-22'),(37821,'3-21')]]
 def norm(s): return re.sub(r'\s+','',unicodedata.normalize('NFKC',str(s or '')).casefold())
 def currency(s):
- s=norm(s); return {'美元':'usd','美金':'usd','南非幣':'zar','南非蘭特':'zar','新臺幣':'twd','新台幣':'twd','台幣':'twd','臺幣':'twd','歐元':'eur','日圓':'jpy','日元':'jpy','澳幣':'aud','澳元':'aud','英鎊':'gbp','人民幣':'cny','港幣':'hkd','港元':'hkd','瑞士法郎':'chf','加幣':'cad','加拿大幣':'cad','紐幣':'nzd'}.get(s,s)
+ s=norm(s); return {'美元':'usd','美金':'usd','南非幣':'zar','南非蘭特':'zar','新臺幣':'twd','新台幣':'twd','台幣':'twd','臺幣':'twd','歐元':'eur','日圓':'jpy','日元':'jpy','澳幣':'aud','澳元':'aud','英鎊':'gbp','人民幣':'cny','港幣':'hkd','港元':'hkd','瑞士法郎':'chf','加幣':'cad','加拿大幣':'cad','紐幣':'nzd','紐西蘭幣':'nzd','日幣':'jpy','新加坡幣':'sgd'}.get(s,s)
 def date(s):
  p=re.findall(r'\d+',str(s));
  if len(p)==1 and len(p[0]) in (7,8): p=[p[0][:-4],p[0][-4:-2],p[0][-2:]]
@@ -63,6 +63,9 @@ def ingest(rr,m,kind,sid,idx,data,today):
   matched+=1
   d=date(get(r,'淨值日期','日期') if kind=='nav' else get(r,'除息日','除息日期'))
   n=number(get(r,'基金淨值','最新淨值小計(總額)') if kind=='nav' else get(r,*AMOUNT_FIELDS))
+  # TDCC 3-5 CSV labels per-unit distribution as 單位數 (verified 2026-11-25).
+  if kind=='div' and sid==11642 and n is None and '單位數' in r and '基金代碼' in r and '除息日' in r:
+   n=number(r['單位數'])
   if n is None:missing+=1
   if not d or d>today:continue
   if kind=='nav':
@@ -86,11 +89,18 @@ def index(catalog):
   for typ,v in [('isin',f.get('isin')),('code',f.get('code'))]:
    if v and f.get('currency'):idx[(f['market'],typ,norm(v),currency(f['currency']))].add(key(f))
  return idx
+TDCC_CODE_ISIN={'agif-fvm':'lu0820561818','agif-fvgm':'lu2023250330','gliacu':'lu2347655073'}
 def match(r,m,idx):
  cu=currency(get(r,'計價幣別','基金幣別','配息幣別','幣別','基金計價幣別')); hits=[]
  for typ,v in [('isin',get(r,'基金ISIN_CODE','基金ISIN Code','ISIN','ISIN Code','ISIN_CODE','基金ISIN')),('code',get(r,'基金統編','基金代碼','統編'))]:
   if v:
    h=idx.get((m,typ,norm(v),cu),set());
+   if h:hits.append(h)
+ if not hits and m=='境外':
+  code=norm(get(r,'基金代碼'))
+  alias=TDCC_CODE_ISIN.get(code,code if re.fullmatch(r'[a-z]{2}[a-z0-9]{9}[0-9]',code) else '')
+  if alias:
+   h=idx.get((m,'isin',alias,cu),set())
    if h:hits.append(h)
  if not hits:return None
  h=set.intersection(*hits);return next(iter(h)) if len(h)==1 else None
@@ -111,6 +121,10 @@ def main():
  for k,f in list(data.items()):
   f['navs']={d:v for d,v in f.get('navs',{}).items() if d>=cutoff};f['history']={d:v for d,v in f.get('history',{}).items() if d>=cutoff}
   if not f['navs'] and not f['history']:del data[k];continue
+  for rec in f['history'].values():
+   prev=(datetime.date.fromisoformat(rec['date'])-datetime.timedelta(days=1)).isoformat()
+   if not rec.get('pre_ex_nav') and f['navs'].get(prev,{}).get('amount'):
+    rec['pre_ex_nav']=f['navs'][prev]['amount']
   nd=max(f['navs'],default=''); hist=sorted(f['history'].values(),key=lambda h:h['date'],reverse=True);h=hist[0] if hist else {}; ex=h.get('date'); prev=(datetime.date.fromisoformat(ex)-datetime.timedelta(days=1)).isoformat() if ex else ''; pre=h.get('pre_ex_nav') or f['navs'].get(prev,{}).get('amount')
   f.update(nav=f['navs'].get(nd,{}).get('amount'),nav_date=nd or None,nav_source=f['navs'].get(nd,{}).get('source'),distribution=h.get('amount'),ex_date=ex,pre_ex_nav=pre,payments_per_year=h.get('frequency'),records=hist)
  tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps({'updated':datetime.datetime.now(datetime.timezone.utc).isoformat(),'status':status,'funds':data},ensure_ascii=False,separators=(',',':')),encoding='utf-8');tmp.replace(path)
