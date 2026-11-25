@@ -67,7 +67,7 @@ def ingest(rr,m,kind,sid,idx,data,today):
   if not k:continue
   matched+=1
   d=date(get(r,'淨值日期','日期') if kind=='nav' else get(r,'除息日','除息日期'))
-  n=number(get(r,'基金淨值','最新淨值小計(總額)') if kind=='nav' else get(r,*AMOUNT_FIELDS))
+  n=number(get(r,'基金淨值','基金淨值(金額)','最新淨值小計(總額)') if kind=='nav' else get(r,*AMOUNT_FIELDS))
   # TDCC 3-5 CSV labels per-unit distribution as 單位數 (verified 2026-11-25).
   if kind=='div' and sid==11642 and n is None and '單位數' in r and '基金代碼' in r and '除息日' in r:
    n=number(r['單位數'])
@@ -99,7 +99,7 @@ def index(catalog):
 TDCC_CODE_ISIN={'agif-fvm':'lu0820561818','agif-fvgm':'lu2023250330','gliacu':'lu2347655073'}
 def match(r,m,idx):
  cu=currency(get(r,'計價幣別','基金幣別','配息幣別','幣別','基金計價幣別')); hits=[]
- for typ,v in [('isin',get(r,'基金ISIN_CODE','基金ISIN Code','ISIN','ISIN Code','ISIN_CODE','基金ISIN')),('code',get(r,'基金統編','基金代碼','統編'))]:
+ for typ,v in [('isin',get(r,'基金ISIN_CODE','基金ISIN Code','ISIN','ISIN Code','ISIN_CODE','ISINCODE','基金ISIN')),('code',get(r,'基金統編','基金代碼','統編'))]:
   if v:
    h=idx.get((m,typ,norm(v),cu),set());
    if h:hits.append(h)
@@ -125,6 +125,16 @@ def main():
    except Exception as e:print(sid,'OpenAPI fallback unavailable',str(e))
   status.append({'id':sid,'count':count,'ok':count>0,'identity_matches':matched,'missing_amount':missing_amount,'date_matches':dates})
   print(sid,'matched',count,'identity_matches',matched,'missing_amount',missing_amount,'date_matches',dates)
+ # Optional reviewed historical NAV input, kept in repository root.
+ manual=ROOT.parent/'historical_nav.csv'
+ if manual.exists():
+  rr=rows(manual.read_bytes())
+  for r in rr:
+   m=get(r,'市場'); k=match(r,m,idx); d=date(get(r,'日期')); n=number(get(r,'基金淨值(金額)')); source=get(r,'來源網址')
+   if k and d and cutoff<=d<=today and n is not None and n>0 and source.startswith('https://'):
+    f=data.setdefault(k,{'navs':{},'history':{}})
+    f['navs'].setdefault(d,{'amount':n,'source':source})
+  print('Reviewed historical NAV input processed')
  for k,f in list(data.items()):
   f['navs']={d:v for d,v in f.get('navs',{}).items() if d>=cutoff};f['history']={d:v for d,v in f.get('history',{}).items() if d>=cutoff}
   if not f['navs'] and not f['history']:del data[k];continue
